@@ -10,6 +10,7 @@ import (
 	"github.com/gitferry/bamboo/types"
 )
 
+//coderBlock是用于编码的区块结构，它包含了区块的所有信息。
 type CoderBlock struct {
 	types.View
 	QC        QC
