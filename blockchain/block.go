@@ -12,6 +12,7 @@ import (
 
 //coderBlock是用于编码的区块结构，它包含了区块的所有信息。
 type CoderBlock struct {
+	// View is the view number of the block.
 	types.View
 	QC        QC
 	Proposer  identity.NodeID
