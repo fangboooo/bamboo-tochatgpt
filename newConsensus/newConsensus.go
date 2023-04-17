@@ -28,7 +28,7 @@ type newConsensus struct {
 	committedBlocks        chan *blockchain.Block
 	forkedBlocks           chan *blockchain.Block
 	echoedQC               map[crypto.Identifier]struct{}
-	//echoedBlock            map[crypto.Identifier]struct{}
+	echoedBlock            map[crypto.Identifier]struct{}
 	//echoedVote             map[crypto.Identifier]struct{}
 }
 
@@ -58,7 +58,7 @@ func NewStreamlet(
 	sl.notarizedChain = make([][]*blockchain.Block, 0)
 	sl.echoedQC = make(map[crypto.Identifier]struct{})
 	//sl.echoedVote = make(map[crypto.Identifier]struct{})
-	//sl.pm.AdvanceView(0)
+	sl.pm.AdvanceView(0)
 	return sl
 }
 
@@ -77,13 +77,13 @@ func (sl *newConsensus) ProcessBlock(block *blockchain.Block) error {
 	}
 	//log.Debug("tar0", sl.pm.GetCurView())
 	log.Debugf("[%v] is processing block, view: %v, id: %x", sl.ID(), block.View, block.ID)
-	curView := sl.pm.GetCurView()
-	//log.Debug("tar1", block.View)
-	//log.Debug("tar2", curView)
-	if block.View < curView {
-		//log.Debug("tar01")
-		return fmt.Errorf("received a stale block")
-	}
+	//curView := sl.pm.GetCurView()
+	////log.Debug("tar1", block.View)
+	////log.Debug("tar2", curView)
+	//if block.View < curView {
+	//	//log.Debug("tar01")
+	//	return fmt.Errorf("received a stale block")
+	//}
 	//log.Debug("tar1", block.PrevID)
 	_, err := sl.bc.GetBlockByID(block.PrevID)
 	if err != nil && block.View > 1 {
@@ -97,12 +97,17 @@ func (sl *newConsensus) ProcessBlock(block *blockchain.Block) error {
 	if !sl.Election.IsLeader(block.Proposer, block.View) {
 		return fmt.Errorf("received a proposal (%v) from an invalid leader (%v)", block.View, block.Proposer)
 	}
-	//log.Debug("tar3")
+	log.Debug("tar3")
 	if block.Proposer != sl.ID() {
 		blockIsVerified, _ := crypto.PubVerify(block.Sig, crypto.IDToByte(block.ID), block.Proposer)
 		if !blockIsVerified {
 			log.Warningf("[%v] received a block with an invalid signature", sl.ID())
 		}
+	}
+	_, exists := sl.echoedBlock[block.ID]
+	if !exists {
+		sl.echoedBlock[block.ID] = struct{}{}
+		sl.Broadcast(block)
 	}
 	//log.Debug("tar4")
 	sl.bc.AddBlock(block)
@@ -118,9 +123,12 @@ func (sl *newConsensus) ProcessBlock(block *blockchain.Block) error {
 	vote := blockchain.MakeVote(block.View, sl.ID(), block.ID)
 	//log.Debug("tar7")
 	// vote to the current leader
-	sl.ProcessVote(vote)
 
-	sl.Broadcast(vote)
+	if block.Proposer == sl.ID() {
+		sl.ProcessVote(vote)
+	} else {
+		sl.Send(block.Proposer, vote)
+	}
 
 	//log.Debug("tar8")
 	// process buffers
@@ -136,7 +144,7 @@ func (sl *newConsensus) ProcessBlock(block *blockchain.Block) error {
 }
 
 func (sl *newConsensus) ProcessVote(vote *blockchain.Vote) {
-	log.Debugf("[%v] is processing the vote, block id: %x", sl.ID(), vote.BlockID)
+	log.Debugf("[%v] is processing the vote, block id: %x", sl.ID(), vote.BlockID, vote.Voter)
 	_, exists := sl.echoedQC[vote.BlockID]
 	if exists {
 		log.Debugf("have this vote about QC, block id: %x", sl.ID(), vote.BlockID)
@@ -228,13 +236,10 @@ func (sl *newConsensus) processTC(tc *pacemaker.TC) {
 // 4. commit blocks
 func (sl *newConsensus) ProcessCertificate(qc *blockchain.QC) {
 	log.Debugf("[%v] is processing a qc, view: %v, block id: %x", sl.ID(), qc.View, qc.BlockID)
-	if qc.View < sl.pm.GetCurView() {
-		return
-	}
 	//log.Debugf("tar1")
 
 	_, err := sl.bc.GetBlockByID(qc.BlockID)
-	if err != nil && qc.View > 1 {
+	if err != nil && qc.View >= 1 {
 		log.Debugf("[%v] buffered the QC, view: %v, id: %x", sl.ID(), qc.View, qc.BlockID)
 		sl.bufferedQCs[qc.BlockID] = qc
 		return
@@ -263,7 +268,7 @@ func (sl *newConsensus) ProcessCertificate(qc *blockchain.QC) {
 		return
 	}
 	//log.Debugf("tar4")
-	//sl.pm.AdvanceView(qc.View)
+	sl.pm.AdvanceView(qc.View)
 	if qc.View < 3 {
 		return
 	}
@@ -325,6 +330,7 @@ func (sl *newConsensus) updateNotarizedChain(qc *blockchain.QC) error {
 	}
 	//log.Debugf("tar9")
 	for i := sl.GetNotarizedHeight() - 1; i >= 0 || i >= sl.GetNotarizedHeight()-3; i-- {
+		log.Debug("[%v] is processing the  notarized block, view: %v, id: %x", sl.ID(), qc.View, qc.BlockID)
 		lastBlocks := sl.notarizedChain[i]
 		for _, b := range lastBlocks {
 			if b.ID == block.PrevID {

@@ -108,7 +108,7 @@ func (bc *BlockChain) GetChildrenBlocks(id crypto.Identifier) []*Block {
 }
 
 func (bc *BlockChain) GetChainGrowth() float64 {
-	return float64(bc.committedBlockNo) / float64(bc.prunedBlockNo+1)
+	return float64(bc.committedBlockNo)
 }
 
 func (bc *BlockChain) GetBlockIntervals() float64 {

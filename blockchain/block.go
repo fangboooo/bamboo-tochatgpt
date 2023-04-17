@@ -101,6 +101,17 @@ func DecotoBlock(Coblock NewCoderBlock) Block {
 	return block
 }
 
+type CommitMessage struct {
+	View     types.View
+	Proposer identity.NodeID
+}
+
+type CommitMessages []*CommitMessage
+
+func (c CommitMessages) Len() int           { return len(c) }
+func (c CommitMessages) Swap(i, j int)      { c[i], c[j] = c[j], c[i] }
+func (c CommitMessages) Less(i, j int) bool { return c[i].View < c[j].View }
+
 type Block struct {
 	types.View
 	QC        *QC
@@ -152,30 +163,19 @@ func (b *Block) makeID(nodeID identity.NodeID) {
 	b.Sig, _ = crypto.PrivSign(crypto.IDToByte(b.ID), nodeID, nil)
 }
 
-func FakeMakeBlock(view types.View, qc *QC, prevID crypto.Identifier, payload []*message.Transaction, proposer identity.NodeID) *Block {
-	b := new(Block)
-	b.View = view
-	b.Proposer = proposer
-	b.QC = qc
-	b.Payload = payload
-	b.PrevID = prevID
-	b.fakemakeID(proposer)
-	return b
-}
-
-func (b *Block) fakemakeID(nodeID identity.NodeID) {
-	raw := &rawBlock{
-		View:     b.View,
-		QC:       b.QC,
-		Proposer: b.Proposer,
-		PrevID:   b.PrevID,
-	}
-	var payloadIDs []string
-	for _, txn := range b.Payload {
-		payloadIDs = append(payloadIDs, txn.ID)
-	}
-	raw.Payload = payloadIDs
-	b.ID = crypto.MakeID(raw)
-	// TODO: uncomment the following
-	b.Sig = [][]byte{{1, 2}, {2, 3}}
-}
+//func (b *Block) fakemakeID(nodeID identity.NodeID) {
+//	raw := &rawBlock{
+//		View:     b.View,
+//		QC:       b.QC,
+//		Proposer: b.Proposer,
+//		PrevID:   b.PrevID,
+//	}
+//	var payloadIDs []string
+//	for _, txn := range b.Payload {
+//		payloadIDs = append(payloadIDs, txn.ID)
+//	}
+//	raw.Payload = payloadIDs
+//	b.ID = crypto.MakeID(raw)
+//	// TODO: uncomment the following
+//	b.Sig = [][]byte{{1, 2}, {2, 3}}
+//}

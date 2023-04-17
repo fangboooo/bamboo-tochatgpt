@@ -248,7 +248,7 @@ func (e *EncBroadcast) handleVal(val Val) error {
 	}
 
 	e.MessageCh <- echo
-	log.Info("send echo to myself")
+	//log.Info("send echo to myself")
 	return nil
 }
 

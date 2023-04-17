@@ -22,3 +22,11 @@ func (st *Static) IsLeader(id identity.NodeID, view types.View) bool {
 func (st *Static) FindLeaderFor(view types.View) identity.NodeID {
 	return st.master
 }
+
+func (st *Static) UpdateWeight(newView types.View) {
+	return
+}
+
+func (r *Static) UpdateBehaviour(comit bool, propose bool, id identity.NodeID) {
+	return
+}

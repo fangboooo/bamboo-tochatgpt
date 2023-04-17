@@ -67,7 +67,7 @@ func (q *Quorum) Add(vote *Vote) (bool, *QC) {
 		q.votes[vote.BlockID] = make(map[identity.NodeID]*Vote)
 	}
 	q.votes[vote.BlockID][vote.Voter] = vote
-	log.Info("vote count is", len(q.votes[vote.BlockID]))
+	//log.Info("vote count is", len(q.votes[vote.BlockID]))
 	if q.superMajority(vote.BlockID) {
 		aggSig, signers, err := q.getSigs(vote.BlockID)
 		if err != nil {

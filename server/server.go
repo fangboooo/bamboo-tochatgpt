@@ -12,7 +12,7 @@ import (
 	"github.com/gitferry/bamboo/log"
 	"github.com/gitferry/bamboo/replica"
 )
-
+//默认hotstuff算法
 var algorithm = flag.String("algorithm", "hotstuff", "BFT consensus algorithm")
 var id = flag.String("id", "", "NodeID of the node")
 var simulation = flag.Bool("sim", false, "simulation mode")
@@ -30,7 +30,7 @@ func initReplica(id identity.NodeID, isByz bool) {
 func main() {
 	bamboo.Init()
 	// the private and public keys are generated here
-	errCrypto := crypto.SetKeys()
+	errCrypto := crypto.SetKeys()//通过调用crypto包的SetKeys函数来生成并设置节点的公钥和私钥。
 	if errCrypto != nil {
 		log.Fatal("Could not generate keys:", errCrypto)
 	}

@@ -54,7 +54,7 @@ func NewStreamlet(
 	sl.echoedVote = make(map[crypto.Identifier]struct{})
 	sl.committedBlockHight = 0
 	sl.committedBlockView = 0
-	//sl.pm.AdvanceView(0)
+	sl.pm.AdvanceView(0)
 	return sl
 }
 
@@ -77,6 +77,7 @@ func (sl *Streamlet) ProcessBlock(block *blockchain.Block) error {
 	}
 	//log.Debugf("tar1")
 	_, err := sl.bc.GetBlockByID(block.PrevID)
+	//log.Debugf("err is ", err)
 	if err != nil && block.View > 1 {
 		// buffer future blocks
 		sl.bufferedBlocks[block.PrevID] = block
@@ -129,7 +130,7 @@ func (sl *Streamlet) ProcessBlock(block *blockchain.Block) error {
 }
 
 func (sl *Streamlet) ProcessVote(vote *blockchain.Vote) {
-	log.Debugf("[%v] is processing the vote, block id: %x", sl.ID(), vote.BlockID)
+	log.Debugf("[%v] is processing the vote, block id: %x from %x", sl.ID(), vote.BlockID, vote.Voter)
 	if vote.Voter != sl.ID() {
 		voteIsVerified, err := crypto.PubVerify(vote.Signature, crypto.IDToByte(vote.BlockID), vote.Voter)
 		if err != nil {
@@ -222,11 +223,8 @@ func (sl *Streamlet) processTC(tc *pacemaker.TC) {
 // 4. commit blocks
 func (sl *Streamlet) ProcessCertificate(qc *blockchain.QC) {
 	log.Debugf("[%v] is processing a qc, view: %v, block id: %x", sl.ID(), qc.View, qc.BlockID)
-	if qc.View < sl.pm.GetCurView() {
-		return
-	}
 	_, err := sl.bc.GetBlockByID(qc.BlockID)
-	if err != nil && qc.View > 1 {
+	if err != nil && qc.View >= 1 {
 		log.Debugf("[%v] buffered the QC, view: %v, id: %x", sl.ID(), qc.View, qc.BlockID)
 		sl.bufferedQCs[qc.BlockID] = qc
 		return
@@ -244,7 +242,7 @@ func (sl *Streamlet) ProcessCertificate(qc *blockchain.QC) {
 		log.Debugf("[%v] cannot notarize the block, %x: %w", sl.ID(), qc.BlockID, err)
 		return
 	}
-	//sl.pm.AdvanceView(qc.View)
+	sl.pm.AdvanceView(qc.View)
 	if qc.View < 3 {
 		return
 	}
@@ -296,6 +294,7 @@ func (sl *Streamlet) updateNotarizedChain(qc *blockchain.QC) error {
 		return nil
 	}
 	for i := sl.GetNotarizedHeight() - 1; i >= 0 || i >= sl.GetNotarizedHeight()-3; i-- {
+		log.Debug("[%v] is processing the  notarized block, view: %v, id: %x", sl.ID(), qc.View, qc.BlockID)
 		lastBlocks := sl.notarizedChain[i]
 		for _, b := range lastBlocks {
 			if b.ID == block.PrevID {
@@ -315,9 +314,10 @@ func (sl *Streamlet) updateNotarizedChain(qc *blockchain.QC) error {
 }
 
 func (sl *Streamlet) GetChainStatus() string {
-	chainGrowthRate := sl.bc.GetChainGrowth()
+	chainGrowthRate := sl.bc.GetChainGrowth() / float64(sl.pm.GetCurView())
 	blockIntervals := sl.bc.GetBlockIntervals()
-	return fmt.Sprintf("[%v] The current view is: %v, chain growth rate is: %v, ave block interval is: %v", sl.ID(), sl.pm.GetCurView(), chainGrowthRate, blockIntervals)
+	log.Infof("[%v] The current view is: %v, chain growth rate is: %v, ave block interval is: %v", sl.ID(), sl.pm.GetCurView(), chainGrowthRate, blockIntervals)
+	return ""
 }
 
 func (sl *Streamlet) GetNotarizedHeight() int {
@@ -344,10 +344,16 @@ func (sl *Streamlet) votingRule(block *blockchain.Block) bool {
 // 2. check if they are consecutive
 // 3. if so, return the second block to commit
 func (sl *Streamlet) commitRule() (bool, *blockchain.Block) {
+	//log.Debugf("tar1")
+
 	height := sl.GetNotarizedHeight()
+	//log.Debugf("tar2")
+
 	if height < 3 {
 		return false, nil
 	}
+	//log.Debugf("tar3")
+
 	lastBlocks := sl.notarizedChain[height-1]
 	if len(lastBlocks) != 1 {
 		return false, nil
@@ -359,15 +365,12 @@ func (sl *Streamlet) commitRule() (bool, *blockchain.Block) {
 	}
 	secondBlock := secondBlocks[0]
 	firstBlocks := sl.notarizedChain[height-3]
-
-	if len(firstBlocks) != 1 || height-2 == sl.committedBlockHight {
+	if len(firstBlocks) != 1 {
 		return false, nil
 	}
 	firstBlock := firstBlocks[0]
 	// check three-chain
 	if ((firstBlock.View + 1) == secondBlock.View) && ((secondBlock.View + 1) == lastBlock.View) {
-		sl.committedBlockHight = height - 1
-		sl.committedBlockView = secondBlock.View
 		return true, secondBlock
 	}
 	return false, nil

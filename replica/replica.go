@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"github.com/gitferry/bamboo/EncBroadCast"
 	"github.com/gitferry/bamboo/newConsensus"
-	"reflect"
-
+	"github.com/gitferry/bamboo/newStreamlet"
 	//fhs "github.com/gitferry/bamboo/fasthostuff"
 	//"github.com/gitferry/bamboo/lbft"
 	"time"
@@ -43,8 +42,10 @@ type Replica struct {
 	forkedBlocks    chan *blockchain.Block
 	eventChan       chan interface{}
 	alg             string
+	//ComiitedMessage blockchain.CommitMessages
 	/* for monitoring node statistics */
-	thrus                string
+	thrus string
+	//
 	lastViewTime         time.Time
 	startTime            time.Time
 	tmpTime              time.Time
@@ -52,7 +53,7 @@ type Replica struct {
 	totalCreateDuration  time.Duration
 	totalProcessDuration time.Duration
 	totalProposeDuration time.Duration
-	totalDelay           time.Duration
+	totalDelay           int64
 	totalRoundTime       time.Duration
 	totalVoteTime        time.Duration
 	totalBlockSize       int
@@ -64,6 +65,7 @@ type Replica struct {
 	proposedNo           int
 	processedNo          int
 	committedNo          int
+	endTarget            bool
 }
 
 // NewReplica creates a new replica instance
@@ -75,10 +77,13 @@ func NewReplica(id identity.NodeID, alg string, isByz bool) *Replica {
 	}
 	if config.GetConfig().Master == "0" {
 		r.Election = election.NewRotation(config.GetConfig().N())
+	} else if config.GetConfig().Master == "-1" {
+		r.Election = election.NewCsHRotation(config.GetConfig().N())
 	} else {
 		r.Election = election.NewStatic(config.GetConfig().Master)
 	}
 	r.isByz = isByz
+	r.endTarget = false
 	r.pd = mempool.NewProducer()
 	r.pm = pacemaker.NewPacemaker(config.GetConfig().N())
 	//log.Debug("init0 view is ", r.pm.GetCurView())
@@ -87,6 +92,7 @@ func NewReplica(id identity.NodeID, alg string, isByz bool) *Replica {
 	r.committedBlocks = make(chan *blockchain.Block, 100)
 	r.forkedBlocks = make(chan *blockchain.Block, 100)
 	r.enc = EncBroadCast.NewencBroadcast(r.Node, config.GetConfig().N(), r.Election)
+	//r.ComiitedMessage = make(blockchain.CommitMessages, 0)
 	r.Register(blockchain.Block{}, r.HandleBlock)
 	r.Register(blockchain.Vote{}, r.HandleVote)
 	r.Register(pacemaker.TMO{}, r.HandleTmo)
@@ -117,6 +123,8 @@ func NewReplica(id identity.NodeID, alg string, isByz bool) *Replica {
 	//	r.Safety = lbft.NewLbft(r.Node, r.pm, r.Election, r.committedBlocks, r.forkedBlocks)
 	case "newConsensus":
 		r.Safety = newConsensus.NewStreamlet(r.Node, r.pm, r.Election, r.committedBlocks, r.forkedBlocks, r.enc)
+	case "newStreamlet":
+		r.Safety = newStreamlet.NewStreamlet(r.Node, r.pm, r.Election, r.committedBlocks, r.forkedBlocks, r.enc)
 	default:
 		r.Safety = streamlet.NewStreamlet(r.Node, r.pm, r.Election, r.committedBlocks, r.forkedBlocks)
 	}
@@ -146,9 +154,6 @@ func (r *Replica) HandleBlock(block blockchain.Block) {
 }
 
 func (r *Replica) HandleVote(vote blockchain.Vote) {
-	if vote.View < r.pm.GetCurView() {
-		return
-	}
 	r.startSignal()
 	log.Debugf("[%v] received a vote frm %v, blockID is %x", r.ID(), vote.Voter, vote.BlockID)
 	r.eventChan <- vote
@@ -178,7 +183,7 @@ func (r *Replica) handleQuery(m message.Query) {
 	//committedRate := float64(r.committedNo) / time.Now().Sub(r.startTime).Seconds()
 	//aveRoundTime := float64(r.totalRoundTime.Milliseconds()) / float64(r.roundNo)
 	//aveProposeTime := aveRoundTime - aveProcessTime - aveVoteProcessTime
-	latency := float64(r.totalDelay.Milliseconds()) / float64(r.latencyNo)
+	latency := float64(r.totalDelay) / float64(r.latencyNo)
 	r.thrus += fmt.Sprintf("Time: %v s. Throughput: %v txs/s\n", time.Now().Sub(r.startTime).Seconds(), float64(r.totalCommittedTx)/time.Now().Sub(r.tmpTime).Seconds())
 	r.totalCommittedTx = 0
 	r.tmpTime = time.Now()
@@ -193,32 +198,28 @@ func (r *Replica) handleTxn(m message.Transaction) {
 	r.pd.AddTxn(&m)
 	r.startSignal()
 	// the first leader kicks off the protocol
-	if r.pm.GetCurView() == 0 {
+	if r.pm.GetCurView() == 0 && r.IsLeader(r.ID(), 1) {
 		log.Debugf("[%v] is going to kick off the protocol", r.ID())
-		//if r.alg == "newConsensus" {
-		//	r.pm.StartView()
-		//	r.processNewView(1)
-		//} else {
-		//	r.pm.AdvanceView(0)
-		//}
-		r.pm.StartView()
-		r.processNewView(1)
+		r.pm.AdvanceView(0)
 	}
 }
 
 /* Processors */
 
 func (r *Replica) processCommittedBlock(block *blockchain.Block) {
-	if block.Proposer == r.ID() {
-		for _, txn := range block.Payload {
-			// only record the delay of transactions from the local memory pool
-			delay := time.Now().Sub(txn.Timestamp)
-			r.totalDelay += delay
-			r.latencyNo++
-		}
+	//if block.Proposer == r.ID() {
+	for _, txn := range block.Payload {
+		// only record the delay of transactions from the local memory pool
+		delay := time.Now().Sub(txn.Timestamp)
+		r.totalDelay += delay.Milliseconds()
+		r.latencyNo++
 	}
+	//
 	r.committedNo++
 	r.totalCommittedTx += len(block.Payload)
+	r.UpdateBehaviour(true, false, block.Proposer)
+	//r.ComiitedMessage = append(r.ComiitedMessage, &blockchain.CommitMessage{block.View, block.Proposer})
+	//log.Infof("lantency is", float64(r.totalDelay.Milliseconds())/float64(r.latencyNo))
 	log.Infof("[%v] the block is committed, No. of transactions: %v, view: %v, current view: %v, id: %x", r.ID(), len(block.Payload), block.View, r.pm.GetCurView(), block.ID)
 }
 
@@ -234,6 +235,10 @@ func (r *Replica) processForkedBlock(block *blockchain.Block) {
 
 func (r *Replica) processNewView(newView types.View) {
 	log.Debugf("[%v] is processing new view: %v, leader is %v", r.ID(), newView, r.FindLeaderFor(newView))
+	if newView > 10 && newView%500 == 0 {
+		r.UpdateWeight(newView)
+	}
+	r.UpdateBehaviour(false, true, r.FindLeaderFor(newView))
 	if !r.IsLeader(r.ID(), newView) {
 		return
 	}
@@ -261,45 +266,76 @@ func (r *Replica) proposeBlock(view types.View) {
 	r.voteStart = time.Now()
 }
 
+// // ListenLocalEvent listens new view and timeout events
+//
+//	func (r *Replica) ListenLocalEvent() {
+//		r.lastViewTime = time.Now()
+//		r.timer = time.NewTimer(r.pm.GetTimerForView())
+//		for {
+//			r.timer.Reset(r.pm.GetTimerForView())
+//			//L:
+//			//	for {
+//			//		select {
+//			//		case view := <-r.pm.EnteringViewEvent():
+//			//			if view >= 2 {
+//			//				r.totalVoteTime += time.Now().Sub(r.voteStart)
+//			//			}
+//			//			// measure round time
+//			//			now := time.Now()
+//			//			lasts := now.Sub(r.lastViewTime)
+//			//			r.totalRoundTime += lasts
+//			//			r.roundNo++
+//			//			r.lastViewTime = now
+//			//			r.eventChan <- view
+//			//			log.Debugf("[%v] the last view lasts %v milliseconds, current view: %v", r.ID(), lasts.Milliseconds(), view)
+//			//			break L
+//			//		case <-r.timer.C:
+//			//			r.Safety.ProcessLocalTmo(r.pm.GetCurView())
+//			//			break L
+//			//		}
+//			//	}
+//			<-r.timer.C
+//			now := time.Now()
+//			lasts := now.Sub(r.lastViewTime)
+//			r.totalRoundTime += lasts
+//			r.roundNo++
+//			r.lastViewTime = now
+//			//log.Info("[%v] the last view lasts %v milliseconds, current view: %v", r.ID(), lasts.Milliseconds(), r.pm.GetCurView())
+//			view := r.pm.GetCurView()
+//			//log.Debug("tar0", view)
+//			r.pm.AdvanceView(view)
+//			curview := <-r.pm.EnteringViewEvent()
+//			r.eventChan <- curview
+//		}
+//	}
+//
 // ListenLocalEvent listens new view and timeout events
 func (r *Replica) ListenLocalEvent() {
 	r.lastViewTime = time.Now()
 	r.timer = time.NewTimer(r.pm.GetTimerForView())
 	for {
 		r.timer.Reset(r.pm.GetTimerForView())
-		//L:
-		//	for {
-		//		select {
-		//		case view := <-r.pm.EnteringViewEvent():
-		//			if view >= 2 {
-		//				r.totalVoteTime += time.Now().Sub(r.voteStart)
-		//			}
-		//			// measure round time
-		//			now := time.Now()
-		//			lasts := now.Sub(r.lastViewTime)
-		//			r.totalRoundTime += lasts
-		//			r.roundNo++
-		//			r.lastViewTime = now
-		//			r.eventChan <- view
-		//			log.Debugf("[%v] the last view lasts %v milliseconds, current view: %v", r.ID(), lasts.Milliseconds(), view)
-		//			break L
-		//		case <-r.timer.C:
-		//			r.Safety.ProcessLocalTmo(r.pm.GetCurView())
-		//			break L
-		//		}
-		//	}
-		<-r.timer.C
-		now := time.Now()
-		lasts := now.Sub(r.lastViewTime)
-		r.totalRoundTime += lasts
-		r.roundNo++
-		r.lastViewTime = now
-		log.Info("[%v] the last view lasts %v milliseconds, current view: %v", r.ID(), lasts.Milliseconds(), r.pm.GetCurView())
-		view := r.pm.GetCurView()
-		//log.Debug("tar0", view)
-		r.pm.AdvanceView(view)
-		curview := <-r.pm.EnteringViewEvent()
-		r.eventChan <- curview
+	L:
+		for {
+			select {
+			case view := <-r.pm.EnteringViewEvent():
+				if view >= 2 {
+					r.totalVoteTime += time.Now().Sub(r.voteStart)
+				}
+				// measure round time
+				now := time.Now()
+				lasts := now.Sub(r.lastViewTime)
+				r.totalRoundTime += lasts
+				r.roundNo++
+				r.lastViewTime = now
+				r.eventChan <- view
+				log.Debugf("[%v] the last view lasts %v milliseconds, current view: %v", r.ID(), lasts.Milliseconds(), view)
+				break L
+			case <-r.timer.C:
+				r.Safety.ProcessLocalTmo(r.pm.GetCurView())
+				break L
+			}
+		}
 	}
 }
 
@@ -323,6 +359,20 @@ func (r *Replica) ListenCoderBlock() {
 	}
 }
 
+func (r *Replica) SetStopTime() {
+
+	timer := time.NewTimer(time.Second * time.Duration(config.Configuration.Benchmark.T))
+	for {
+		<-timer.C
+		latency := float64(r.totalDelay) / float64(r.latencyNo)
+		log.Infof("Time: %v s. Throughput: %v txs/s\n", time.Now().Sub(r.startTime).Seconds(), float64(r.totalCommittedTx)/float64(config.Configuration.Benchmark.T))
+		log.Infof("Latency: %v\n", latency)
+		r.endTarget = true
+		r.GetChainStatus()
+		return
+	}
+}
+
 func (r *Replica) startSignal() {
 	if !r.isStarted.Load() {
 		r.startTime = time.Now()
@@ -341,9 +391,13 @@ func (r *Replica) Start() {
 	go r.ListenLocalEvent()
 	go r.ListenCommittedBlocks()
 	go r.ListenCoderBlock()
+	go r.SetStopTime()
 	for r.isStarted.Load() {
+		if r.endTarget == true {
+			return
+		}
 		event := <-r.eventChan
-		log.Info("type is ", reflect.TypeOf(event))
+		//log.Info("type is ", reflect.TypeOf(event))
 		switch v := event.(type) {
 		case types.View:
 			r.processNewView(v)

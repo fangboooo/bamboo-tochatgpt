@@ -106,12 +106,12 @@ func (b *Benchmark) Run() {
 	confirmCount = uint64(len(b.latency))
 	log.Infof("Concurrency = %d", b.Concurrency)
 	log.Infof("Benchmark Time = %v\n", t)
-	log.Infof("Throughput = %f B/s\n", float64(len(b.latency))*float64(config.GetConfig().PayloadSize)/t.Seconds())
+	log.Infof("Throughput = %f txn/s\n", float64(len(b.latency))/t.Seconds())
 	log.Infof("genCount: %d, sendCount: %d, confirmCount: %d", genCount, sendCount, confirmCount)
 	log.Info(stat)
 
-	stat.WriteFile("latency")
-	b.History.WriteFile("history")
+	//stat.WriteFile("latency")
+	//b.History.WriteFile("history")
 }
 
 func (b *Benchmark) worker(keys <-chan int, result chan<- time.Duration) {

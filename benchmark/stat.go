@@ -3,8 +3,8 @@ package benchmark
 import (
 	"bufio"
 	"fmt"
+	"github.com/gitferry/bamboo/log"
 	"os"
-	"sort"
 	"time"
 )
 
@@ -42,25 +42,27 @@ func (s Stat) String() string {
 
 // Statistic function creates Stat object from raw latency data
 func Statistic(latency []time.Duration) Stat {
-	ms := make([]float64, 0)
+	var ms float64
 	for _, l := range latency {
-		ms = append(ms, float64(l.Nanoseconds())/1000000.0)
+		ms += float64(l.Nanoseconds()) / 1000000.0
 	}
-	sort.Float64s(ms)
-	sum := 0.0
-	for _, m := range ms {
-		sum += m
-	}
-	size := len(ms)
-	return Stat{
-		Data:   ms,
-		Size:   size,
-		Mean:   sum / float64(size),
-		Min:    ms[0],
-		Max:    ms[size-1],
-		Median: ms[int(0.5*float64(size))],
-		P95:    ms[int(0.95*float64(size))],
-		P99:    ms[int(0.99*float64(size))],
-		P999:   ms[int(0.999*float64(size))],
-	}
+	log.Infof("Lantency = %f ms\n", ms/float64(len(latency)))
+	return Stat{}
+	//sort.Float64s(ms)
+	//sum := 0.0
+	//for _, m := range ms {
+	//	sum += m
+	//}
+	//size := len(ms)
+	//return Stat{
+	//	Data:   ms,
+	//	Size:   size,
+	//	Mean:   sum / float64(size),
+	//	Min:    ms[0],
+	//	Max:    ms[size-1],
+	//	Median: ms[int(0.5*float64(size))],
+	//	P95:    ms[int(0.95*float64(size))],
+	//	P99:    ms[int(0.99*float64(size))],
+	//	P999:   ms[int(0.999*float64(size))],
+	//}
 }

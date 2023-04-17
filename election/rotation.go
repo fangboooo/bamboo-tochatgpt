@@ -19,6 +19,10 @@ func NewRotation(peerNo int) *Rotation {
 	}
 }
 
+func (r *Rotation) UpdateWeight(newView types.View) {
+	return
+}
+
 func (r *Rotation) IsLeader(id identity.NodeID, view types.View) bool {
 	if view <= 3 {
 		if id.Node() < r.peerNo {
@@ -43,4 +47,8 @@ func (r *Rotation) FindLeaderFor(view types.View) identity.NodeID {
 	data := binary.BigEndian.Uint64(bs)
 	id := data%uint64(r.peerNo) + 1
 	return identity.NewNodeID(int(id))
+}
+
+func (r *Rotation) UpdateBehaviour(comit bool, propose bool, id identity.NodeID) {
+	return
 }
